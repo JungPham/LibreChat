@@ -28,11 +28,13 @@ services:
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
       - no_proxy=${no_proxy:-localhost,127.0.0.1,::1},${NO_PROXY:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,rag_api,vectordb,host.docker.internal
+      - TZ=Asia/Ho_Chi_Minh
     volumes:
       - type: bind
         source: ./.env
         target: /app/.env
       - ./images:/app/client/public/images
+      - ./librechat.yaml:/app/librechat.yaml
       - ./uploads:/app/uploads
       - ./logs:/app/logs
       - ./skill:/app/skill
@@ -59,7 +61,7 @@ services:
     restart: always
     user: "${UID}:${GID}"
     volumes:
-      - ./data-node:/data/db
+      - data-node:/data/db
     command: mongod --noauth
   meilisearch:
     container_name: chat-meilisearch
@@ -94,6 +96,70 @@ services:
     env_file:
       - .env
 
+  litellm:
+    image: ghcr.io/berriai/litellm:1.101.0
+    container_name: litellm
+    command:
+      - "--config"
+      - "/app/config.yaml"
+      - "--port"
+      - "4000"
+    environment:
+      GEMINI_API_KEY1: "REPLACE_ME"
+      GEMINI_API_KEY2: "REPLACE_ME"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+
+  mcp-office-docs:
+    image: georgx22/mcp-office-docs:latest
+    container_name: mcp-office-docs
+    restart: always
+    ports:
+      - "8958:8958"
+    volumes:
+      # Local output directory (used by LOCAL strategy)
+      - ./output:/app/output
+      # Custom Office templates (optional): custom_pptx_template_4_3.pptx, custom_pptx_template_16_9.pptx,
+      # custom_docx_template.docx, custom_email_template.html — plus any .pptx/.potx registered in
+      # config/pptx_templates.yaml. Both directories are re-read when they change, no restart needed.
+      - ./custom_templates:/app/custom_templates
+      # Config directory containing:
+      #   - email_templates.yaml (dynamic email tool definitions – Mustache templates)
+      #   - docx_templates.yaml (dynamic Word tool definitions)
+      #   - pptx_templates.yaml (optional: register named PowerPoint templates)
+      #   - credentials or other configuration files (e.g., GCS service account JSON)
+      - ./config:/app/config
+
+  google-workspace-mcp:
+    container_name: google-workspace-mcp
+    image: ghcr.io/taylorwilsdon/google_workspace_mcp:1.27.1
+    restart: unless-stopped
+
+    environment:
+      MCP_ENABLE_OAUTH21: "false"
+      GOOGLE_OAUTH_CLIENT_ID: "REPLACE_ME"
+      GOOGLE_OAUTH_CLIENT_SECRET: "REPLACE_ME"
+
+      WORKSPACE_MCP_HOST: "0.0.0.0"
+      WORKSPACE_MCP_PORT: "8000"
+      GOOGLE_OAUTH_REDIRECT_URI: "http://localhost:18000/oauth2callback"
+      OAUTHLIB_INSECURE_TRANSPORT: "1"
+
+      TOOLS: "gmail drive calendar slides"
+
+      GOOGLE_MCP_CREDENTIALS_DIR: "/app/store_creds"
+
+      ALLOWED_FILE_DIRS: "/app/output"
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - google_workspace_credentials:/app/store_creds
+      - ./output:/app/output:ro
+    ports:
+      - "127.0.0.1:18000:8000"
+
 volumes:
   pgdata2:
   librechat-data:
+  data-node:
+  google_workspace_credentials:
